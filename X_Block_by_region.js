@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X (Twitter) _Block_by_region
-// @namespace    http://tampermonkey.net/
-// @version      1.0
+// @namespace    https://github.com/yuuki49033/X_block_by_region
+// @version      1.0.2
 // @description  FIFO队列管理，滚动侦听，自动QueryID，双维度过滤
 // @author       Gemini
 // @match        https://x.com/*
@@ -10,6 +10,8 @@
 // @grant        GM_getValue
 // @grant        GM_addStyle
 // @run-at       document-end
+// @downloadURL https://update.greasyfork.org/scripts/565965/X%20%28Twitter%29%20_Block_by_region.user.js
+// @updateURL https://update.greasyfork.org/scripts/565965/X%20%28Twitter%29%20_Block_by_region.meta.js
 // ==/UserScript==
 
 (function() {
@@ -228,7 +230,7 @@
         ball.style.right = (config.ballPos?.right || 20) + 'px';
         ball.style.bottom = (config.ballPos?.bottom || 20) + 'px';
         menu.innerHTML = `
-            <div style="font-weight:bold;margin-bottom:8px;">X-Blocker 设置</div>
+            <div style="font-weight:bold;margin-bottom:8px;">设置</div>
 <div class="infoRow">
     QueryID (点击可修改): <br>
     <input id="qIdInput" value="${currentQueryId}"

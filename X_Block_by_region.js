@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         X (Twitter) _Block_by_region
 // @namespace    https://github.com/yuuki49033/X_block_by_region
-// @version      1.0.2
+// @version      1.0.3
 // @description  FIFO队列管理，滚动侦听，自动QueryID，双维度过滤
 // @author       Gemini
 // @match        https://x.com/*
@@ -27,76 +27,45 @@
 
     let userQueue = []; // FIFO 队列
     let cache = new Map(); // 存储用户数据 {loc, src}
-    let currentQueryId = ''; // 默认初始 ID
+    //let currentQueryId = ''; // 默认初始 ID
     const BEARER_TOKEN = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
-
+    let currentQueryId = GM_getValue('currentQueryId', '');
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
     // --- 2. 优化后的 QueryID 嗅探 (精准匹配 UserAbout JS) ---
-    async function sniffQueryId() {
+async function sniffQueryId() {
+        // 如果用户手动设置了 ID，自动嗅探将不再改写它，除非嗅探到了一个不同的新 ID
+        const isLocked = GM_getValue('isManualLocked', false);
+
         try {
-            // 1. 查找包含 "UserAbout" 关键字的脚本
             const scripts = Array.from(document.querySelectorAll('script[src*="UserAbout"]'));
-            let found = false;
+            let foundId = null;
 
             for (let s of scripts) {
                 const res = await fetch(s.src);
                 const text = await res.text();
-
-                // 这里的正则精准匹配你发现的结构：id: "...", name: "AboutAccountQuery"
-                // 使用了查找后面必须跟着 AboutAccountQuery 的断言匹配
                 const match = text.match(/id\s*:\s*"([^"]+)"\s*,\s*metadata\s*:\s*\{[^\}]*\}\s*,\s*name\s*:\s*"AboutAccountQuery"/);
-
                 if (match && match[1]) {
-                    currentQueryId = match[1];
-                    GM_setValue('currentQueryId', currentQueryId);
-
-                    // 使用 input 的 value 而不是 innerText
-                    const qInput = document.getElementById('qIdInput');
-                    if (qInput) qInput.value = currentQueryId;
-
-                    found = true;
+                    foundId = match[1];
                     break;
                 }
             }
 
-            // 2. 兜底逻辑：如果当前页面没加载 UserAbout.js，尝试主脚本匹配
-            if (!found) {
-                const mainScripts = Array.from(document.querySelectorAll('script[src*="/main."]'));
-                for (let s of mainScripts) {
-                    const res = await fetch(s.src);
-                    const text = await res.text();
-                    const mainMatch = text.match(/"AboutAccountQuery",queryId:"([^"]+)"/);
-                    if (mainMatch) {
-                        currentQueryId = mainMatch[1];
-                        GM_setValue('currentQueryId', currentQueryId);
-                        found = true;
-                        break;
-                    }
+            if (foundId) {
+                // 只有当自动发现的 ID 和当前 ID 不一致时，才更新（并解除锁定，因为说明自动工具又活了）
+                if (foundId !== currentQueryId) {
+                    currentQueryId = foundId;
+                    GM_setValue('currentQueryId', foundId);
+                    GM_setValue('isManualLocked', false); // 自动修复成功，解除锁定
+                    const qInput = document.getElementById('qIdInput');
+                    if (qInput) qInput.value = foundId;
+                    console.log("[系统] 自动同步到了新的 QueryID:", foundId);
                 }
+            } else if (!isLocked && !window.location.href.includes('/about')) {
+                // 只有在没锁定且没找到的情况下，才去跳转
+                // ... 原有的跳转逻辑 ...
             }
-
-//             // 3. 强制修复逻辑：如果依然没找到，且不在 ElonMusk 的 about 页
-//             // 因为 UserAbout.js 通常只有在访问 /about 页面时才会被 X 加载
-//             if (!found && !window.location.href.includes('/about')) {
-//                 console.warn("[系统] 当前页面未检测到 UserAbout 脚本，跳转至 About 页强制获取...");
-//                 GM_setValue('returnUrl', window.location.href);
-//                 window.location.href = 'https://x.com/elonmusk/about';
-//             }
-
-//             // 4. 成功获取后的回跳
-//             if (found && window.location.href.includes('/about')) {
-//                 const returnUrl = GM_getValue('returnUrl');
-//                 if (returnUrl && returnUrl !== window.location.href) {
-//                     GM_setValue('returnUrl', null);
-//                     console.log("[系统] 获取成功，1秒后返回原页面...");
-//                     setTimeout(() => { window.location.href = returnUrl; }, 1000);
-//                 }
-//             }
-
-        } catch (e) {
-            console.error("[系统] 嗅探过程出错:", e);
-        }
+        } catch (e) { console.error(e); }
     }
 
     // --- 3. 消费者：API 请求处理 (FIFO) ---
@@ -291,18 +260,20 @@
         }
 
         // 辅助保存函数
-        function saveManualId(newId) {
-            newId = newId.trim();
-            if (newId && newId !== currentQueryId) {
-                currentQueryId = newId;
-                GM_setValue('currentQueryId', newId); // 持久化到缓存
-                console.log(`%c[系统] 手动更新 QueryID 为: ${newId}`, "color: #00ba7c; font-weight: bold;");
+function saveManualId(newId) {
+        newId = newId.trim();
+        if (newId && newId !== currentQueryId) {
+            currentQueryId = newId;
+            // 存入两个值：一个是 ID，一个是“手动锁定”标记
+            GM_setValue('currentQueryId', newId);
+            GM_setValue('isManualLocked', true);
 
-                // 顺便更新一下显示效果（防止多次输入不统一）
-                const qVal = document.getElementById('qIdInput');
-                if (qVal) qVal.value = newId;
-            }
+            console.log(`%c[系统] 手动更新并锁定 QueryID: ${newId}`, "color: #00ba7c; font-weight: bold;");
+
+            const qInput = document.getElementById('qIdInput');
+            if (qInput) qInput.value = newId;
         }
+    }
         setInterval(() => { document.getElementById('qCount').innerText = userQueue.length; }, 1000);
         renderRules();
     }
